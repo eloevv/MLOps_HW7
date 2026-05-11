@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+artifacts/
+*.pkl
+pipeline.env
+requirements.lock
+.env

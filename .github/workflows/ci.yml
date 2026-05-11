@@ -1,0 +1,48 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python ml_pipeline.py
+
+      - name: Make pipeline reproducible
+        run: |
+          pip freeze > requirements.lock
+          echo "GIT_COMMIT=${{ github.sha }}" >> pipeline.env
+          echo "GIT_REF=${{ github.ref }}" >> pipeline.env
+          python -c "
+          import json, hashlib, pathlib
+          hp = json.loads(pathlib.Path('artifacts/hyperparameters.json').read_text())
+          metrics = json.loads(pathlib.Path('artifacts/metrics.json').read_text())
+          lock_hash = hashlib.sha256(pathlib.Path('requirements.lock').read_bytes()).hexdigest()[:12]
+          snapshot = {'commit': '${{ github.sha }}'[:12], 'hyperparameters': hp, 'metrics': metrics, 'requirements_hash': lock_hash}
+          pathlib.Path('artifacts/snapshot.json').write_text(json.dumps(snapshot, indent=2))
+          print(json.dumps(snapshot, indent=2))
+          "
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-artifacts-${{ github.sha }}
+          path: |
+            artifacts/
+            requirements.lock
+            pipeline.env
+          retention-days: 30

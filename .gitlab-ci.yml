@@ -1,0 +1,74 @@
+stages:
+  - train
+  - test
+  - build
+  - deploy
+
+variables:
+  MODEL_VERSION: "v1.0.0"
+  PYTHON_VERSION: "3.11"
+
+train:
+  stage: train
+  image: python:3.11-slim
+  script:
+    - pip install -r requirements.txt -q
+    - python ml_pipeline.py
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 1 week
+
+test:
+  stage: test
+  image: python:3.11-slim
+  dependencies:
+    - train
+  script:
+    - pip install -r requirements.txt -q
+    - python -c "import joblib; m = joblib.load('artifacts/model.pkl'); print('Model OK')"
+    - python -c "import json; m = json.load(open('artifacts/metrics.json')); assert m['accuracy'] > 0.9, f'Accuracy too low: {m[\"accuracy\"]}'"
+
+make-pipeline-reproducible:
+  stage: train
+  image: python:3.11-slim
+  script:
+    - pip install -r requirements.txt -q
+    - pip freeze > requirements.lock
+    - python -c "import json; hp = json.load(open('artifacts/hyperparameters.json')); print('Hyperparameters:', hp)"
+    - echo "MODEL_VERSION=$MODEL_VERSION" >> pipeline.env
+    - echo "GIT_COMMIT=$CI_COMMIT_SHA" >> pipeline.env
+    - cat pipeline.env
+  artifacts:
+    paths:
+      - requirements.lock
+      - pipeline.env
+    reports:
+      dotenv: pipeline.env
+  needs:
+    - train
+
+build-image:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA -t $CI_REGISTRY_IMAGE:$MODEL_VERSION .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$MODEL_VERSION
+  only:
+    - main
+
+deploy-green:
+  stage: deploy
+  script:
+    - echo "Deploying version $MODEL_VERSION to green slot"
+    - echo "Image $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  environment:
+    name: production/green
+  only:
+    - main
+  when: manual

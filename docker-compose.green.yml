@@ -1,0 +1,41 @@
+services:
+  ml-service-blue:
+    image: ml-service:v1.0.0
+    container_name: ml-service-blue
+    environment:
+      - MODEL_VERSION=v1.0.0
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  ml-service-green:
+    build: .
+    image: ml-service:v1.1.0
+    container_name: ml-service-green
+    environment:
+      - MODEL_VERSION=v1.1.0
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.green.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      ml-service-green:
+        condition: service_healthy
+    restart: unless-stopped
